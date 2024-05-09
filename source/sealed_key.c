@@ -1,9 +1,17 @@
 #include "sealed_key.h"
 
-int decryptSealedKey(uint8_t *sealedKey, uint8_t *decryptedSealedKey) {
+int validateSealedKey(PfsSKKey *key) {
+    // compare MAGIC
+    if (memcmp(key->entry.MAGIC, SEALED_KEY_MAGIC, sizeof(SEALED_KEY_MAGIC)) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+int decryptSealedKey(PfsSKKey *key) {
     uint8_t dummy[0x10];
     int fd;
-    uint8_t data[ENC_KEY_LEN + DEC_KEY_LEN] = {0};
+    uint8_t data[ENC_KEY_LEN + DEC_KEY_LEN];
     memset(data, 0, sizeof(data));
 
     UNUSED(dummy);
@@ -12,14 +20,14 @@ int decryptSealedKey(uint8_t *sealedKey, uint8_t *decryptedSealedKey) {
         return -1;
     }
 
-    memcpy(data, sealedKey, ENC_KEY_LEN);
+    memcpy(data, key, ENC_KEY_LEN);
 
     if (ioctl(fd, 0xc0845302, data) == -1) {
         close(fd);
         return -1;
     }
 
-    memcpy(decryptedSealedKey, &data[ENC_KEY_LEN], DEC_KEY_LEN);
+    memcpy(key->entry.DEC_KEY, &data[ENC_KEY_LEN], DEC_KEY_LEN);
 
     close(fd);
     return 0;

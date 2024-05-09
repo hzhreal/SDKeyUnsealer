@@ -10,27 +10,19 @@
 int obtain_IP(char *ip_address) {
     int ret = -1;
 
-    SceNetCtlInfo *netInfo = (SceNetCtlInfo *)malloc(sizeof(SceNetCtlInfo));
-    if (!netInfo) {
-        goto clean;
-    }
-    memset(netInfo, 0, sizeof(SceNetCtlInfo));
+    SceNetCtlInfo netInfo;
+    memset(&netInfo, 0, sizeof(SceNetCtlInfo));
     
     ret = sceNetCtlInit();
     if (ret >= 0) {
-        ret = sceNetCtlGetInfo(SCE_NET_CTL_INFO_IP_ADDRESS, netInfo);
+        ret = sceNetCtlGetInfo(SCE_NET_CTL_INFO_IP_ADDRESS, &netInfo);
 
         if (ret >= 0) {
-            memcpy(ip_address, netInfo->ip_address, sizeof(netInfo->ip_address));
+            memcpy(ip_address, netInfo.ip_address, sizeof(netInfo.ip_address));
             sceNetCtlTerm();
         }
     }
-
-    clean:
-        if (netInfo) {
-            free(netInfo);
-        }
-        return ret;
+    return ret;
 }
 
 // get the every byte as int, keep adding the sum to uint8_t 
@@ -83,36 +75,38 @@ int _main(struct thread *td) {
         goto exit;
     }
 
-    printf_notification("SDKeyUnsealer: %s %d", ip_address, PORT);
+    printf_notification("%s: %s %d", SERVER_NAME, ip_address, PORT);
    
     // handle incoming connections, FOREVER
     while (1) {
         struct sockaddr_in client_addr;
         socklen_t client_len = sizeof(client_addr);
+
         int client_socket;
         int bytes_received;
-        int ret;
         uint8_t buffer[ENC_KEY_LEN + CHKS_LEN];
         uint8_t out[DEC_KEY_LEN + CHKS_LEN];
-        uint8_t enc_key[ENC_KEY_LEN];
-        uint8_t dec_key[DEC_KEY_LEN];
         char chks[CHKS_LEN + 1];
 
+        PfsSKKey *sealed_key = (PfsSKKey *)malloc(sizeof(PfsSKKey));
+        if (!sealed_key) {
+            printf_notification("Memory allocation error.");
+            break;
+        }
+
         memset(buffer, 0, sizeof(buffer));
-        memset(enc_key, 0, sizeof(enc_key));
-        memset(dec_key, 0, sizeof(dec_key));
+        memset(sealed_key, 0, sizeof(PfsSKKey));
 
         // accept client connection
         client_socket = sceNetAccept(server_socket, (struct sockaddr *)&client_addr, &client_len);
-        if (client_socket < 0) {
+        if (client_socket <= 0) {
             continue;
         }
 
         // receive data from client
         bytes_received = sceNetRecv(client_socket, buffer, sizeof(buffer), 0);
         if (bytes_received < 0) {
-            SckClose(client_socket);
-            continue;
+            goto iterate;
         }
 
         // checksum
@@ -120,25 +114,37 @@ int _main(struct thread *td) {
         if (memcmp(buffer + ENC_KEY_LEN, chks, CHKS_LEN) != 0) {
             char msg[] = "Invalid checksum or data length.";
             SckSend(client_socket, msg, sizeof(msg) - 1);
-            SckClose(client_socket);
-            continue;
+            goto iterate;
         }
 
-        memcpy(enc_key, buffer, ENC_KEY_LEN);
-        ret = decryptSealedKey(buffer, dec_key);
-        if (ret == -1) {
+        memcpy(sealed_key, buffer, ENC_KEY_LEN);
+
+        // check if if key is valid
+        if (validateSealedKey(sealed_key) != 0) {
+            char msg[] = "Invalid sealed key.";
+            SckSend(client_socket, msg, sizeof(msg) - 1);
+            goto iterate;
+        }
+
+        // finally, decrypt key
+        if (decryptSealedKey(sealed_key) == -1) {
             char msg[] = "Failed to decrypt key.";
             SckSend(client_socket, msg, sizeof(msg) - 1);
-            SckClose(client_socket);
-            continue;
+            goto iterate;
         }
 
-        calc_chks(dec_key, DEC_KEY_LEN, chks);
-        memcpy(out, dec_key, DEC_KEY_LEN);
+        // send back decrypted key + checksum to client, SUCCESS
+        calc_chks(sealed_key->entry.DEC_KEY, DEC_KEY_LEN, chks);
+        memcpy(out, sealed_key->entry.DEC_KEY, DEC_KEY_LEN);
         memcpy(out + DEC_KEY_LEN, chks, CHKS_LEN);
-
         SckSend(client_socket, (char *)out, sizeof(out));
-        SckClose(client_socket);
+
+        iterate:
+            if (sealed_key) {
+                free(sealed_key);
+            }
+            SckClose(client_socket);
+            continue;
     }
 
     exit:
