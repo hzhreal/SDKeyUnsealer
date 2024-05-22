@@ -33,13 +33,13 @@ void calc_chks(uint8_t *data, size_t len, char *chks_str) {
     for (i = 0; i < len; i++) {
         sum += data[i];
     }
-    sprintf(chks_str, "%02x", sum);
+    snprintf(chks_str, CHKS_LEN + 1, "%02x", sum);
 }
 
 int _main(struct thread *td) {
     int server_socket = -1;
     char ip_address[SCE_NET_CTL_IPV4_ADDR_STR_LEN] = {0};
-    struct sockaddr_in *sk;
+    struct sockaddr_in sk;
 
     UNUSED(td);
 
@@ -50,6 +50,8 @@ int _main(struct thread *td) {
 
     jailbreak();
     initSysUtil();
+
+    memset(&sk, 0, sizeof(struct sockaddr_in));
 
     // get IP Address of console
     if (obtain_IP(ip_address) < 0) {
@@ -64,7 +66,7 @@ int _main(struct thread *td) {
     }
 
     // bind the socket
-    if (bindSocket(server_socket, (struct sockaddr *)sk, sizeof(struct sockaddr_in)) < 0) {
+    if (bindSocket(server_socket, (struct sockaddr *)&sk, sizeof(struct sockaddr_in)) < 0) {
         printf_notification("Could not bind socket.");
         goto exit;
     }
