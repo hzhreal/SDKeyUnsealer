@@ -19,5 +19,3 @@ An already compiled version will be available in the releases page.
 
 The port is defined in source/main.c  
 An example client is located in example/client.py
-
-You can find a more detailed client in https://github.com/hzhreal/HTOS/blob/main/network/socket_functions.py
